@@ -1,0 +1,37 @@
+import { test, expect } from '@playwright/test';
+import WebSocket from 'ws';
+
+test('真实浏览器与独立网络玩家同步', async ({ page }) => {
+  const errors = []; page.on('pageerror', (error) => errors.push(error.message));
+  const room = `DUAL${Math.floor(Math.random() * 9000 + 1000)}`;
+  await page.goto('/?mode=online');
+  await page.waitForFunction(() => window.__ready && window.__deltaPortal?.assets, null, { timeout: 90000 });
+  await page.locator('[data-mode="online"]').click();
+  await page.locator('[data-op="vyron"]').click();
+  await page.locator('#delta-room').fill(room);
+  await page.locator('#delta-deploy').click();
+  await page.waitForFunction(() => window.__G?.delta?.self, null, { timeout: 90000 });
+  const socket = new WebSocket('ws://127.0.0.1:8080/ws');
+  await new Promise((resolve, reject) => { socket.once('open', resolve); socket.once('error', reject); });
+  socket.send(JSON.stringify({ type: 'join', room, name: '网络玩家', operator: 'luna', mode: 'online' }));
+  await page.waitForFunction(() => window.__G.delta.avatars.size === 1, null, { timeout: 20000 });
+  expect(await page.evaluate(() => [...window.__G.delta.avatars.values()][0].userData.target.operator)).toBe('luna');
+  expect(await page.evaluate(() => window.__G.enemies.list.length)).toBe(0);
+  expect(await page.evaluate(() => window.__G.level.objectives.length)).toBe(0);
+  await expect(page.locator('#delta-map')).toBeVisible();
+  await page.waitForFunction(() => window.__G.delta.tacticalMap.lastDraw > 0);
+  await page.screenshot({ path: 'test-results/port-minimap.png' });
+  await page.keyboard.press('KeyM');
+  await expect(page.locator('#delta-map')).toHaveClass(/expanded/);
+  await page.screenshot({ path: 'test-results/port-full-map.png' });
+  expect(await page.evaluate(() => window.__G.game.state)).toBe('playing');
+  await page.keyboard.press('KeyM');
+  await expect(page.locator('#delta-map')).not.toHaveClass(/expanded/);
+  await page.keyboard.press('KeyM');
+  await expect(page.locator('#delta-map')).toHaveClass(/expanded/);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#delta-map')).not.toHaveClass(/expanded/);
+  expect(await page.evaluate(() => window.__G.game.state)).toBe('playing');
+  expect(errors).toEqual([]);
+  socket.close();
+});
